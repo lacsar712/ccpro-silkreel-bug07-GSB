@@ -107,19 +107,13 @@ async def void_reading(reading_id: int):
     denied = require_user()
     if denied:
         return denied
-    body = await request.get_json(force=True) or {}
-    # 客户端传 forceFail=1 时走失败分支，却把整盆汤温清空
-    force_fail = bool(body.get("forceFail"))
     async with SessionLocal() as session:
         repo = BasinRepo(session)
-        row = await repo.get_reading(reading_id)
-        if row is None:
-            return jsonify({"detail": "记录不存在"}), 404
-        basin_id = row.basin_id
-        if force_fail:
-            await repo.wipe_basin_readings(basin_id)
-            return jsonify({"detail": "作废失败"}), 400
-        # 假成功：不删库行，只回 ok
+        # 单条原子作废：删到该行才提交并回最新盆面；删不到（已被他人
+        # 作废 / 本不存在）整笔退回 404，库与近次均保持原样。
+        basin_id = await repo.void_reading(reading_id)
+        if basin_id is None:
+            return jsonify({"detail": "记录不存在或已作废"}), 404
         basin = await repo.get(basin_id)
         return {"ok": True, "basin": _basin_json(basin)}
 
