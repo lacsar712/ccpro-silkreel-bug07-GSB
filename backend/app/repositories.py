@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -51,14 +51,20 @@ class BasinRepo:
         )
         return result.scalar_one_or_none()
 
-    async def delete_reading(self, row: BathReading) -> None:
-        await self.session.delete(row)
-        await self.session.commit()
+    async def void_reading(self, reading_id: int) -> int | None:
+        """原子作废一条汤温：删到行返回所属盆 id；行不存在或已被并发作废则返回 None。
 
-    async def wipe_basin_readings(self, basin_id: int) -> None:
+        单条 DELETE 由数据库行锁串行化，两名工同时作废同一条时只有一人删得到，
+        另一人 affected 0 行，保证只成功一次、角标只减 1。
+        """
         result = await self.session.execute(
-            select(BathReading).where(BathReading.basin_id == basin_id)
+            delete(BathReading)
+            .where(BathReading.id == reading_id)
+            .returning(BathReading.basin_id)
         )
-        for row in result.scalars().all():
-            await self.session.delete(row)
+        basin_id = result.scalar_one_or_none()
+        if basin_id is None:
+            await self.session.rollback()
+            return None
         await self.session.commit()
+        return basin_id

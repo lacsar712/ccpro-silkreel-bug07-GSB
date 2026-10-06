@@ -49,7 +49,6 @@ function Yard() {
   const [picked, setPicked] = useState(null);
   const [temp, setTemp] = useState("40");
   const [err, setErr] = useState("");
-  const [hiddenIds, setHiddenIds] = useState([]);
 
   async function refresh() {
     const data = await api("/api/board");
@@ -102,17 +101,15 @@ function Yard() {
   async function voidReading(readingId, forceFail = false) {
     setErr("");
     try {
-      await api(`/api/readings/${readingId}/void`, {
+      const row = await api(`/api/readings/${readingId}/void`, {
         method: "POST",
         body: JSON.stringify({ forceFail }),
       });
-      // 界面先藏起来，角标仍用板面旧 readingCount
-      setHiddenIds((prev) => [...prev, readingId]);
-      setPicked({
-        ...picked,
-        recentReadings: (picked.recentReadings || []).filter((r) => r.id !== readingId),
-      });
+      // 以库为准刷新：近次消失、角标同步减 1
+      await refresh();
+      if (row.basin) setPicked(row.basin);
     } catch (ex) {
+      // 失败整笔退回：重新拉板面，近次仍在、其它行不少
       setErr(ex.message);
       await refresh();
     }
@@ -160,19 +157,17 @@ function Yard() {
           </h3>
           <p>最近汤温：{picked.latestTempC ?? "无"} ℃ · 记录 {picked.readingCount} 次</p>
           <ul class="recent">
-            {(picked.recentReadings || [])
-              .filter((r) => !hiddenIds.includes(r.id))
-              .map((r) => (
-                <li key={r.id}>
-                  {r.waterTempC}℃ · {r.operator}
-                  <button type="button" onClick={() => voidReading(r.id, false)}>
-                    作废
-                  </button>
-                  <button type="button" onClick={() => voidReading(r.id, true)}>
-                    强制失败作废
-                  </button>
-                </li>
-              ))}
+            {(picked.recentReadings || []).map((r) => (
+              <li key={r.id}>
+                {r.waterTempC}℃ · {r.operator}
+                <button type="button" onClick={() => voidReading(r.id, false)}>
+                  作废
+                </button>
+                <button type="button" onClick={() => voidReading(r.id, true)}>
+                  强制失败作废
+                </button>
+              </li>
+            ))}
           </ul>
           <input value={temp} onInput={(e) => setTemp(e.target.value)} />
           <button onClick={writeTemp}>登记汤温</button>
